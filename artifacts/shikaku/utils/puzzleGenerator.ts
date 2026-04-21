@@ -33,15 +33,11 @@ function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea:
     for (let c = 0; c < cols; c++) {
       if (grid[r][c]) continue;
 
-      // Find max width to the right (consecutive empty cells in row r starting at c)
       let maxW = 0;
       while (c + maxW < cols && !grid[r][c + maxW]) maxW++;
 
-      // Enumerate candidate (w, h) with rect anchored at (r, c) as top-left,
-      // staying within grid and not overlapping occupied cells.
       const candidates: { w: number; h: number; area: number }[] = [];
       for (let w = 1; w <= maxW; w++) {
-        // For each width, compute max height such that all cells in [r..r+h-1] x [c..c+w-1] are empty
         let maxH = 0;
         outer: for (let h = 1; r + h - 1 < rows; h++) {
           for (let cc = c; cc < c + w; cc++) {
@@ -55,27 +51,22 @@ function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea:
         }
       }
 
-      let pick: { w: number; h: number };
-      if (candidates.length === 0) {
-        // Cannot place a rectangle of valid area starting here -> abort, retry with new seed
-        return null;
-      } else {
-        // Bias toward larger areas but keep variety: weight = area
-        const weights = candidates.map(c => c.area);
-        const total = weights.reduce((a, b) => a + b, 0);
-        let pickIdx = 0;
-        let r2 = rng() * total;
-        for (let i = 0; i < weights.length; i++) {
-          r2 -= weights[i];
-          if (r2 <= 0) {
-            pickIdx = i;
-            break;
-          }
-        }
-        pick = candidates[pickIdx];
-      }
+      if (candidates.length === 0) return null;
 
-      // Place the rectangle
+      // Bias toward larger areas weighted by area
+      const weights = candidates.map(c => c.area);
+      const total = weights.reduce((a, b) => a + b, 0);
+      let pickIdx = 0;
+      let r2 = rng() * total;
+      for (let i = 0; i < weights.length; i++) {
+        r2 -= weights[i];
+        if (r2 <= 0) {
+          pickIdx = i;
+          break;
+        }
+      }
+      const pick = candidates[pickIdx];
+
       for (let dr = 0; dr < pick.h; dr++) {
         for (let dc = 0; dc < pick.w; dc++) {
           grid[r + dr][c + dc] = true;
@@ -87,41 +78,149 @@ function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea:
   return rects;
 }
 
-export function generatePuzzle(difficulty: Difficulty, seed: number, name: string, id: string): Puzzle {
+// Count solutions of a puzzle by backtracking. Stops at `limit` to keep it fast.
+function countSolutions(rows: number, cols: number, hints: Hint[], limit: number): number {
+  // Precompute candidate rectangles for each hint
+  const candsForHint: RectSpec[][] = hints.map(hint => {
+    const out: RectSpec[] = [];
+    const v = hint.value;
+    for (let r0 = Math.max(0, hint.row - v + 1); r0 <= hint.row; r0++) {
+      for (let r1 = hint.row; r1 < Math.min(rows, r0 + v); r1++) {
+        const h = r1 - r0 + 1;
+        if (v % h !== 0) continue;
+        const w = v / h;
+        for (let c0 = Math.max(0, hint.col - w + 1); c0 <= hint.col; c0++) {
+          const c1 = c0 + w - 1;
+          if (c1 < hint.col || c1 >= cols) continue;
+          // exactly one hint inside (the current one)
+          let containsCount = 0;
+          for (const h2 of hints) {
+            if (h2.row >= r0 && h2.row <= r1 && h2.col >= c0 && h2.col <= c1) {
+              containsCount++;
+              if (containsCount > 1) break;
+            }
+          }
+          if (containsCount !== 1) continue;
+          out.push({ r0, r1, c0, c1 });
+        }
+      }
+    }
+    return out;
+  });
+
+  // If any hint has zero candidates, unsolvable
+  for (const cands of candsForHint) if (cands.length === 0) return 0;
+
+  // Order hints by least candidates first (constraint propagation friendly)
+  const order = hints.map((_, i) => i).sort((a, b) => candsForHint[a].length - candsForHint[b].length);
+
+  const grid: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
+  let count = 0;
+
+  function place(rect: RectSpec, val: number) {
+    for (let r = rect.r0; r <= rect.r1; r++)
+      for (let c = rect.c0; c <= rect.c1; c++)
+        grid[r][c] = val;
+  }
+  function fits(rect: RectSpec): boolean {
+    for (let r = rect.r0; r <= rect.r1; r++)
+      for (let c = rect.c0; c <= rect.c1; c++)
+        if (grid[r][c] !== 0) return false;
+    return true;
+  }
+  function solve(idx: number) {
+    if (count >= limit) return;
+    if (idx === order.length) {
+      // ensure full coverage
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < cols; c++)
+          if (grid[r][c] === 0) return;
+      count++;
+      return;
+    }
+    const hi = order[idx];
+    const cands = candsForHint[hi];
+    for (const rect of cands) {
+      if (!fits(rect)) continue;
+      place(rect, hi + 1);
+      solve(idx + 1);
+      place(rect, 0);
+      if (count >= limit) return;
+    }
+  }
+  solve(0);
+  return count;
+}
+
+interface BuiltPuzzle {
+  rows: number;
+  cols: number;
+  hints: Hint[];
+  layout: RectSpec[];
+}
+
+function buildOnce(difficulty: Difficulty, seed: number, hintRng: () => number): BuiltPuzzle | null {
   const { rows, cols, minArea, maxArea } = difficultyConfig(difficulty);
-
-  // Try multiple seed offsets in case some fail to fully tile
-  let layout: RectSpec[] | null = null;
-  let attemptSeed = seed;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const rng = mulberry32(attemptSeed);
-    layout = tryGenerateLayout(rows, cols, minArea, maxArea, rng);
-    if (layout) break;
-    attemptSeed = (attemptSeed * 16807 + 1) >>> 0;
-  }
-
-  // Final fallback: allow 1x1 rectangles too (always succeeds)
-  if (!layout) {
-    const rng = mulberry32(seed);
-    layout = tryGenerateLayout(rows, cols, 1, maxArea, rng) || [];
-  }
-
-  const finalRng = mulberry32(attemptSeed ^ 0xABCDEF);
+  const layout = tryGenerateLayout(rows, cols, minArea, maxArea, mulberry32(seed));
+  if (!layout) return null;
   const hints: Hint[] = layout.map(rect => {
     const w = rect.c1 - rect.c0 + 1;
     const h = rect.r1 - rect.r0 + 1;
-    const hr = rect.r0 + Math.floor(finalRng() * h);
-    const hc = rect.c0 + Math.floor(finalRng() * w);
+    const hr = rect.r0 + Math.floor(hintRng() * h);
+    const hc = rect.c0 + Math.floor(hintRng() * w);
     return { row: hr, col: hc, value: w * h };
   });
+  return { rows, cols, hints, layout };
+}
 
+function buildUniquePuzzle(difficulty: Difficulty, baseSeed: number, maxAttempts = 60): BuiltPuzzle {
+  let bestNonUnique: { built: BuiltPuzzle; count: number } | null = null;
+  let seed = baseSeed >>> 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Try several hint placements per layout before changing layout
+    for (let hintTry = 0; hintTry < 6; hintTry++) {
+      const hintRng = mulberry32((seed ^ 0x9E3779B9 ^ (hintTry * 2654435761)) >>> 0);
+      const built = buildOnce(difficulty, seed, hintRng);
+      if (!built) break; // bad layout seed, skip to next
+      const count = countSolutions(built.rows, built.cols, built.hints, 2);
+      if (count === 1) return built;
+      if (count >= 1 && (!bestNonUnique || count < bestNonUnique.count)) {
+        bestNonUnique = { built, count };
+      }
+    }
+    // Move to next layout seed
+    seed = (Math.imul(seed, 16807) + 1) >>> 0;
+  }
+
+  // Fallback: best we found (still solvable, just not unique)
+  if (bestNonUnique) return bestNonUnique.built;
+
+  // Worst case: build with relaxed minArea
+  const cfg = difficultyConfig(difficulty);
+  const layout = tryGenerateLayout(cfg.rows, cfg.cols, 1, cfg.maxArea, mulberry32(baseSeed)) || [];
+  const hintRng = mulberry32(baseSeed ^ 0xABCDEF);
+  const hints: Hint[] = layout.map(rect => {
+    const w = rect.c1 - rect.c0 + 1;
+    const h = rect.r1 - rect.r0 + 1;
+    return {
+      row: rect.r0 + Math.floor(hintRng() * h),
+      col: rect.c0 + Math.floor(hintRng() * w),
+      value: w * h,
+    };
+  });
+  return { rows: cfg.rows, cols: cfg.cols, hints, layout };
+}
+
+export function generatePuzzle(difficulty: Difficulty, seed: number, name: string, id: string): Puzzle {
+  const built = buildUniquePuzzle(difficulty, seed);
   return {
     id,
     name,
-    rows,
-    cols,
-    hints,
-    solution: layout.map(rect => ({
+    rows: built.rows,
+    cols: built.cols,
+    hints: built.hints,
+    solution: built.layout.map(rect => ({
       row: rect.r0,
       col: rect.c0,
       width: rect.c1 - rect.c0 + 1,
@@ -140,7 +239,6 @@ const PUZZLE_NAMES: Record<Difficulty, string[]> = {
 
 export function generatePuzzleSet(difficulty: Difficulty, count = 8): Puzzle[] {
   const names = PUZZLE_NAMES[difficulty];
-  // Deterministic seeds per (difficulty, index) so puzzle IDs remain stable for completion tracking
   const baseSeed = difficulty === 'easy' ? 1000 : difficulty === 'medium' ? 5000 : 9000;
   return Array.from({ length: count }).map((_, i) =>
     generatePuzzle(
@@ -152,7 +250,6 @@ export function generatePuzzleSet(difficulty: Difficulty, count = 8): Puzzle[] {
   );
 }
 
-// Random "infinite" puzzle generation (used for the "next puzzle" flow)
 export function generateRandomPuzzle(difficulty: Difficulty): Puzzle {
   const seed = (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0;
   return generatePuzzle(difficulty, seed, 'Losowa', `${difficulty}-rand-${seed}`);
