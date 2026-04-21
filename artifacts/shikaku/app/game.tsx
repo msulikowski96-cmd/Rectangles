@@ -17,6 +17,7 @@ import { GameGrid } from '../components/GameGrid';
 import { CompletionModal } from '../components/CompletionModal';
 import { formatTime } from '../utils/gameLogic';
 import { ALL_PUZZLES } from '../data/puzzles';
+import { generateRandomPuzzle } from '../utils/puzzleGenerator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_PADDING = 32;
@@ -58,7 +59,8 @@ export default function GameScreen() {
     if (nextPuzzle) {
       startGame(nextPuzzle);
     } else {
-      router.back();
+      // Past the curated list — generate an endless fresh puzzle
+      startGame(generateRandomPuzzle(selectedDifficulty));
     }
   };
 
@@ -83,11 +85,7 @@ export default function GameScreen() {
     ? Math.round((rectangles.length / puzzle.hints.length) * 100)
     : 0;
 
-  const hasNext = (() => {
-    const puzzles = ALL_PUZZLES[selectedDifficulty];
-    const currentIdx = puzzles.findIndex(p => p.id === puzzle.id);
-    return currentIdx >= 0 && currentIdx < puzzles.length - 1;
-  })();
+  const hasNext = true; // endless puzzles via the generator
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
