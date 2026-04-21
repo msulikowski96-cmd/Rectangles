@@ -24,7 +24,7 @@ const GRID_PADDING = 32;
 export default function GameScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { gameState, resetGame, startGame, selectedDifficulty } = useGame();
+  const { gameState, resetGame, startGame, selectedDifficulty, undo, canUndo } = useGame();
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -108,13 +108,26 @@ export default function GameScreen() {
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.iconBtn, { backgroundColor: colors.muted }]}
-          onPress={handleReset}
-          activeOpacity={0.7}
-        >
-          <Feather name="refresh-cw" size={18} color={colors.foreground} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[
+              styles.iconBtn,
+              { backgroundColor: colors.muted, opacity: canUndo ? 1 : 0.4 },
+            ]}
+            onPress={undo}
+            disabled={!canUndo}
+            activeOpacity={0.7}
+          >
+            <Feather name="rotate-ccw" size={18} color={colors.foreground} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: colors.muted }]}
+            onPress={handleReset}
+            activeOpacity={0.7}
+          >
+            <Feather name="refresh-cw" size={18} color={colors.foreground} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Stats Bar */}
@@ -180,6 +193,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
   puzzleTitle: {
     fontSize: 17,

@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { Platform } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Puzzle, Rectangle, Cell, GameState, Difficulty } from '../types/game';
 import {
@@ -14,14 +16,21 @@ interface CompletedPuzzle {
   moves: number;
 }
 
+interface ExtendedGameState extends GameState {
+  history: Rectangle[][];
+  lastErrorAt: number;
+}
+
 interface GameContextType {
-  gameState: GameState | null;
+  gameState: ExtendedGameState | null;
   startGame: (puzzle: Puzzle) => void;
   beginDrawing: (cell: Cell) => void;
   updateDrawing: (cell: Cell) => void;
   endDrawing: () => void;
   deleteRectangle: (id: string) => void;
   resetGame: () => void;
+  undo: () => void;
+  canUndo: boolean;
   completedPuzzles: Record<string, CompletedPuzzle>;
   selectedDifficulty: Difficulty;
   setSelectedDifficulty: (d: Difficulty) => void;
@@ -29,8 +38,18 @@ interface GameContextType {
 
 const GameContext = createContext<GameContextType | null>(null);
 
+function triggerHaptic(type: 'light' | 'medium' | 'success' | 'error') {
+  if (Platform.OS === 'web') return;
+  try {
+    if (type === 'light') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    else if (type === 'medium') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    else if (type === 'success') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    else if (type === 'error') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+  } catch {}
+}
+
 export function GameProvider({ children }: { children: React.ReactNode }) {
-  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [gameState, setGameState] = useState<ExtendedGameState | null>(null);
   const [completedPuzzles, setCompletedPuzzles] = useState<Record<string, CompletedPuzzle>>({});
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('easy');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -50,11 +69,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   };
 
   const saveCompletedPuzzle = async (id: string, time: number, moves: number) => {
-    const updated = { ...completedPuzzles, [id]: { id, time, moves } };
-    setCompletedPuzzles(updated);
-    try {
-      await AsyncStorage.setItem('completedPuzzles', JSON.stringify(updated));
-    } catch {}
+    setCompletedPuzzles(prev => {
+      const existing = prev[id];
+      if (existing && existing.time <= time) return prev;
+      const updated = { ...prev, [id]: { id, time, moves } };
+      AsyncStorage.setItem('completedPuzzles', JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
   };
 
   const startTimer = () => {
@@ -80,6 +101,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       moves: 0,
       startTime: now,
       elapsedTime: 0,
+      history: [],
+      lastErrorAt: 0,
     });
     setTimeout(startTimer, 100);
   }, []);
@@ -94,6 +117,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const updateDrawing = useCallback((cell: Cell) => {
     setGameState(prev => {
       if (!prev || !prev.drawingStart) return prev;
+      if (prev.drawingEnd && prev.drawingEnd.row === cell.row && prev.drawingEnd.col === cell.col) {
+        return prev;
+      }
       return { ...prev, drawingEnd: cell };
     });
   }, []);
@@ -102,14 +128,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGameState(prev => {
       if (!prev || !prev.drawingStart || !prev.drawingEnd) return prev;
 
-      const { drawingStart, drawingEnd, puzzle, rectangles } = prev;
-
-      // Check if drawing over existing rectangle to delete it
+      const { drawingStart, drawingEnd, puzzle, rectangles, history } = prev;
       const { minRow, maxRow, minCol, maxCol } = getRectangleBounds(
         drawingStart.row, drawingStart.col, drawingEnd.row, drawingEnd.col
       );
 
-      // If it's a single cell tap, check if there's a rectangle there to delete
+      // Single tap on existing rect → delete
       if (minRow === maxRow && minCol === maxCol) {
         const existingRect = rectangles.find(r => {
           const rb = getRectangleBounds(r.startRow, r.startCol, r.endRow, r.endCol);
@@ -117,8 +141,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
                  drawingStart.col >= rb.minCol && drawingStart.col <= rb.maxCol;
         });
         if (existingRect) {
+          triggerHaptic('light');
           const newRects = rectangles.filter(r => r.id !== existingRect.id);
-          return { ...prev, rectangles: newRects, drawingStart: null, drawingEnd: null };
+          return {
+            ...prev,
+            rectangles: newRects,
+            drawingStart: null,
+            drawingEnd: null,
+            history: [...history, rectangles],
+          };
         }
       }
 
@@ -130,7 +161,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (!validation.valid) {
-        return { ...prev, drawingStart: null, drawingEnd: null };
+        triggerHaptic('error');
+        return { ...prev, drawingStart: null, drawingEnd: null, lastErrorAt: Date.now() };
       }
 
       const hint = validation.containedHint!;
@@ -146,26 +178,35 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         isCorrect: true,
       };
 
-      // Remove any existing rect that covered this hint
       const filteredRects = rectangles.filter(r => !(r.hintRow === hint.row && r.hintCol === hint.col));
       const newRects = [...filteredRects, newRect];
-
       const isComplete = checkPuzzleComplete(puzzle, newRects);
 
       if (isComplete) {
         if (timerRef.current) clearInterval(timerRef.current);
+        triggerHaptic('success');
         const time = Math.floor((Date.now() - prev.startTime) / 1000);
         const moves = prev.moves + 1;
         saveCompletedPuzzle(puzzle.id, time, moves);
-        return { ...prev, rectangles: newRects, drawingStart: null, drawingEnd: null, isComplete: true, moves };
+        return {
+          ...prev,
+          rectangles: newRects,
+          drawingStart: null,
+          drawingEnd: null,
+          isComplete: true,
+          moves,
+          history: [...history, rectangles],
+        };
       }
 
+      triggerHaptic('medium');
       return {
         ...prev,
         rectangles: newRects,
         drawingStart: null,
         drawingEnd: null,
         moves: prev.moves + 1,
+        history: [...history, rectangles],
       };
     });
   }, []);
@@ -173,7 +214,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const deleteRectangle = useCallback((id: string) => {
     setGameState(prev => {
       if (!prev) return prev;
-      return { ...prev, rectangles: prev.rectangles.filter(r => r.id !== id) };
+      return {
+        ...prev,
+        rectangles: prev.rectangles.filter(r => r.id !== id),
+        history: [...prev.history, prev.rectangles],
+      };
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setGameState(prev => {
+      if (!prev || prev.history.length === 0 || prev.isComplete) return prev;
+      triggerHaptic('light');
+      const previousState = prev.history[prev.history.length - 1];
+      return {
+        ...prev,
+        rectangles: previousState,
+        history: prev.history.slice(0, -1),
+        drawingStart: null,
+        drawingEnd: null,
+      };
     });
   }, []);
 
@@ -192,6 +252,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         moves: 0,
         startTime: now,
         elapsedTime: 0,
+        history: [],
+        lastErrorAt: 0,
       };
     });
   }, []);
@@ -205,6 +267,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       endDrawing,
       deleteRectangle,
       resetGame,
+      undo,
+      canUndo: !!gameState && gameState.history.length > 0 && !gameState.isComplete,
       completedPuzzles,
       selectedDifficulty,
       setSelectedDifficulty,
