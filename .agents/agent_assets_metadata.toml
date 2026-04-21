@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "jgHDnuWpVzLJhHkK14J8U"
+uri = "file://artifacts/shikaku/assets/images/icon.png"
+type = "image"
+title = "shikaku puzzle game icon"

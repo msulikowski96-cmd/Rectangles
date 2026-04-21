@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Shikaku Puzzle"
+version = "1.0.0"
+id = "artifacts/shikaku"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 24726
+
+[services.development]
+run = "pnpm --filter @workspace/shikaku run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/shikaku", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/shikaku", "run", "serve" ]
+
+[services.env]
+PORT = "24726"
+BASE_PATH = "/"
