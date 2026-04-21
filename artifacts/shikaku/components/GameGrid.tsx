@@ -28,6 +28,9 @@ export function GameGrid({ cellSize }: GameGridProps) {
   const { puzzle, rectangles, drawingStart, drawingEnd } = gameState;
   const { rows, cols, hints } = puzzle;
 
+  // Label size proportional to cell but capped
+  const labelSize = Math.min(Math.round(cellSize * 0.55), 18);
+
   const getCellFromPosition = useCallback((pageX: number, pageY: number) => {
     const { x, y } = gridLayout.current;
     const localX = pageX - x;
@@ -79,78 +82,106 @@ export function GameGrid({ cellSize }: GameGridProps) {
   const gridHeight = rows * cellSize;
 
   return (
-    <View
-      ref={gridRef}
-      onLayout={(evt) => {
-        gridRef.current?.measureInWindow((x, y, width, height) => {
-          gridLayout.current = { x, y, width, height };
-        });
-      }}
-      style={[styles.grid, { width: gridWidth, height: gridHeight, borderColor: colors.gridBorder }]}
-      {...panResponder.panHandlers}
-    >
-      {/* Grid lines */}
-      {Array.from({ length: rows }).map((_, row) =>
-        Array.from({ length: cols }).map((_, col) => (
-          <View
-            key={`cell-${row}-${col}`}
-            style={[
-              styles.cell,
-              {
-                width: cellSize,
-                height: cellSize,
-                top: row * cellSize,
-                left: col * cellSize,
-                borderColor: colors.gridLine,
-              },
-            ]}
-          />
-        ))
-      )}
+    <View>
+      {/* Top row: corner spacer + column numbers */}
+      <View style={[styles.labelsRow, { marginLeft: labelSize + 4 }]}>
+        {Array.from({ length: cols }).map((_, col) => (
+          <View key={`col-label-${col}`} style={{ width: cellSize, alignItems: 'center' }}>
+            <Text style={[styles.axisLabel, { fontSize: labelSize, color: colors.mutedForeground }]}>
+              {col + 1}
+            </Text>
+          </View>
+        ))}
+      </View>
 
-      {/* Placed rectangles */}
-      {rectangles.map((rect) => (
-        <PlacedRect key={rect.id} rect={rect} cellSize={cellSize} colors={colors} />
-      ))}
-
-      {/* Drawing preview */}
-      {drawingBounds && (
-        <View
-          style={[
-            styles.drawingRect,
-            {
-              top: drawingBounds.minRow * cellSize + 2,
-              left: drawingBounds.minCol * cellSize + 2,
-              width: (drawingBounds.maxCol - drawingBounds.minCol + 1) * cellSize - 4,
-              height: (drawingBounds.maxRow - drawingBounds.minRow + 1) * cellSize - 4,
-              backgroundColor: colors.drawingRect,
-              borderColor: colors.drawingRectBorder,
-            },
-          ]}
-          pointerEvents="none"
-        />
-      )}
-
-      {/* Hints (numbers) */}
-      {hints.map((hint) => (
-        <View
-          key={`hint-${hint.row}-${hint.col}`}
-          style={[
-            styles.hintContainer,
-            {
-              top: hint.row * cellSize,
-              left: hint.col * cellSize,
-              width: cellSize,
-              height: cellSize,
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={[styles.hintText, { color: colors.hintText, fontSize: cellSize * 0.4 }]}>
-            {hint.value}
-          </Text>
+      {/* Grid body: row numbers + grid */}
+      <View style={styles.bodyRow}>
+        {/* Row numbers */}
+        <View style={[styles.rowLabelsCol, { width: labelSize + 4 }]}>
+          {Array.from({ length: rows }).map((_, row) => (
+            <View key={`row-label-${row}`} style={{ height: cellSize, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 4 }}>
+              <Text style={[styles.axisLabel, { fontSize: labelSize, color: colors.mutedForeground }]}>
+                {row + 1}
+              </Text>
+            </View>
+          ))}
         </View>
-      ))}
+
+        {/* The actual grid */}
+        <View
+          ref={gridRef}
+          onLayout={() => {
+            gridRef.current?.measureInWindow((x, y, width, height) => {
+              gridLayout.current = { x, y, width, height };
+            });
+          }}
+          style={[styles.grid, { width: gridWidth, height: gridHeight, borderColor: colors.gridBorder }]}
+          {...panResponder.panHandlers}
+        >
+          {/* Grid lines */}
+          {Array.from({ length: rows }).map((_, row) =>
+            Array.from({ length: cols }).map((_, col) => (
+              <View
+                key={`cell-${row}-${col}`}
+                style={[
+                  styles.cell,
+                  {
+                    width: cellSize,
+                    height: cellSize,
+                    top: row * cellSize,
+                    left: col * cellSize,
+                    borderColor: colors.gridLine,
+                  },
+                ]}
+              />
+            ))
+          )}
+
+          {/* Placed rectangles */}
+          {rectangles.map((rect) => (
+            <PlacedRect key={rect.id} rect={rect} cellSize={cellSize} colors={colors} />
+          ))}
+
+          {/* Drawing preview */}
+          {drawingBounds && (
+            <View
+              style={[
+                styles.drawingRect,
+                {
+                  top: drawingBounds.minRow * cellSize + 2,
+                  left: drawingBounds.minCol * cellSize + 2,
+                  width: (drawingBounds.maxCol - drawingBounds.minCol + 1) * cellSize - 4,
+                  height: (drawingBounds.maxRow - drawingBounds.minRow + 1) * cellSize - 4,
+                  backgroundColor: colors.drawingRect,
+                  borderColor: colors.drawingRectBorder,
+                },
+              ]}
+              pointerEvents="none"
+            />
+          )}
+
+          {/* Hints (numbers) */}
+          {hints.map((hint) => (
+            <View
+              key={`hint-${hint.row}-${hint.col}`}
+              style={[
+                styles.hintContainer,
+                {
+                  top: hint.row * cellSize,
+                  left: hint.col * cellSize,
+                  width: cellSize,
+                  height: cellSize,
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={[styles.hintText, { color: colors.hintText, fontSize: cellSize * 0.4 }]}>
+                {hint.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
@@ -179,6 +210,21 @@ function PlacedRect({ rect, cellSize, colors }: { rect: Rectangle; cellSize: num
 }
 
 const styles = StyleSheet.create({
+  labelsRow: {
+    flexDirection: 'row',
+    marginBottom: 2,
+  },
+  bodyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  rowLabelsCol: {
+    flexDirection: 'column',
+  },
+  axisLabel: {
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   grid: {
     position: 'relative',
     borderWidth: 2,
