@@ -16,8 +16,6 @@ import { useColors } from '../hooks/useColors';
 import { GameGrid } from '../components/GameGrid';
 import { CompletionModal } from '../components/CompletionModal';
 import { formatTime } from '../utils/gameLogic';
-import { ALL_PUZZLES } from '../data/puzzles';
-import { generateRandomPuzzle } from '../utils/puzzleGenerator';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_PADDING = 32;
@@ -25,7 +23,7 @@ const GRID_PADDING = 32;
 export default function GameScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { gameState, resetGame, startGame, selectedDifficulty, undo, canUndo } = useGame();
+  const { gameState, resetGame, startLevel, undo, canUndo } = useGame();
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -54,15 +52,7 @@ export default function GameScreen() {
 
   const handleNext = () => {
     if (!gameState) return;
-    const puzzles = ALL_PUZZLES[selectedDifficulty];
-    const currentIdx = puzzles.findIndex(p => p.id === gameState.puzzle.id);
-    const nextPuzzle = puzzles[currentIdx + 1];
-    if (nextPuzzle) {
-      startGame(nextPuzzle);
-    } else {
-      // Past the curated list — generate an endless fresh puzzle
-      startGame(generateRandomPuzzle(selectedDifficulty));
-    }
+    startLevel(gameState.level + 1);
   };
 
   if (!gameState) {

@@ -5,10 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  Image,
   ScrollView,
-  useColorScheme,
-  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -16,44 +13,39 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGame } from '../context/GameContext';
 import { useColors } from '../hooks/useColors';
 import { HowToPlay } from '../components/HowToPlay';
-import { ALL_PUZZLES } from '../data/puzzles';
-import { Difficulty } from '../types/game';
-import { Puzzle } from '../types/game';
 import { formatTime } from '../utils/gameLogic';
+import { levelConfig } from '../utils/puzzleGenerator';
 
-const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  easy: 'Easy',
-  medium: 'Medium',
-  hard: 'Hard',
-};
+const LEVEL_COLOR = '#5856d6';
 
-const DIFFICULTY_DESC: Record<Difficulty, string> = {
-  easy: '5×5 grid',
-  medium: '7×7 grid',
-  hard: '9×9 grid',
-};
-
-const DIFFICULTY_COLORS: Record<Difficulty, string> = {
-  easy: '#34c759',
-  medium: '#ff9500',
-  hard: '#ff3b30',
-};
+function difficultyLabel(level: number): string {
+  const cfg = levelConfig(level);
+  if (cfg.maxArea <= 5) return 'Łatwy';
+  if (cfg.maxArea <= 7) return 'Średni';
+  if (cfg.maxArea <= 9) return 'Trudny';
+  return 'Ekspert';
+}
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { startGame, completedPuzzles, selectedDifficulty, setSelectedDifficulty } = useGame();
+  const { startLevel, completedLevels, highestLevelReached } = useGame();
   const [showHelp, setShowHelp] = useState(false);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  const puzzles = ALL_PUZZLES[selectedDifficulty];
+  const nextLevel = highestLevelReached;
+  const nextCfg = levelConfig(nextLevel);
+  const completedCount = Object.keys(completedLevels).length;
 
-  const handlePlay = (puzzle: Puzzle) => {
-    startGame(puzzle);
+  const handlePlay = (level: number) => {
+    startLevel(level);
     router.push('/game');
   };
+
+  // Build the list of levels to show: all completed + the next one to play
+  const completedSorted = Object.values(completedLevels).sort((a, b) => b.level - a.level);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -61,7 +53,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: topPad + 16, backgroundColor: colors.background }]}>
         <View>
           <Text style={[styles.appName, { color: colors.foreground }]}>Shikaku</Text>
-          <Text style={[styles.tagline, { color: colors.mutedForeground }]}>Rectangle Puzzle</Text>
+          <Text style={[styles.tagline, { color: colors.mutedForeground }]}>Łamigłówka prostokątów</Text>
         </View>
         <TouchableOpacity
           style={[styles.helpBtn, { backgroundColor: colors.muted }]}
@@ -77,83 +69,86 @@ export default function HomeScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad + 20 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Difficulty Selector */}
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Difficulty</Text>
-        <View style={[styles.difficultyRow, { backgroundColor: colors.muted, borderColor: colors.border }]}>
-          {((['easy', 'medium', 'hard'] as Difficulty[])).map(d => (
-            <TouchableOpacity
-              key={d}
-              style={[
-                styles.difficultyTab,
-                selectedDifficulty === d && { backgroundColor: colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-              ]}
-              onPress={() => setSelectedDifficulty(d)}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.difficultyLabel,
-                  { color: selectedDifficulty === d ? DIFFICULTY_COLORS[d] : colors.mutedForeground },
-                ]}
-              >
-                {DIFFICULTY_LABELS[d]}
-              </Text>
-              <Text style={[styles.difficultyDesc, { color: colors.mutedForeground }]}>
-                {DIFFICULTY_DESC[d]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Hero card: next level to play */}
+        <TouchableOpacity
+          style={[styles.heroCard, { backgroundColor: LEVEL_COLOR }]}
+          onPress={() => handlePlay(nextLevel)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.heroLeft}>
+            <Text style={styles.heroLabel}>Następny poziom</Text>
+            <Text style={styles.heroLevel}>Poziom {nextLevel}</Text>
+            <Text style={styles.heroMeta}>
+              {nextCfg.rows}×{nextCfg.cols} · {difficultyLabel(nextLevel)}
+            </Text>
+          </View>
+          <View style={styles.heroPlay}>
+            <Feather name="play" size={28} color={LEVEL_COLOR} />
+          </View>
+        </TouchableOpacity>
 
-        {/* Puzzle List */}
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Select Puzzle</Text>
-        <View style={styles.puzzleList}>
-          {puzzles.map((puzzle, idx) => {
-            const completed = completedPuzzles[puzzle.id];
-            return (
-              <TouchableOpacity
-                key={puzzle.id}
-                style={[styles.puzzleCard, { backgroundColor: colors.card, borderColor: completed ? DIFFICULTY_COLORS[selectedDifficulty] + '60' : colors.border }]}
-                onPress={() => handlePlay(puzzle)}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.puzzleNumber, { backgroundColor: completed ? DIFFICULTY_COLORS[selectedDifficulty] + '20' : colors.muted }]}>
-                  <Text style={[styles.puzzleNumText, { color: completed ? DIFFICULTY_COLORS[selectedDifficulty] : colors.mutedForeground }]}>
-                    {idx + 1}
-                  </Text>
-                </View>
-                <View style={styles.puzzleInfo}>
-                  <Text style={[styles.puzzleName, { color: colors.foreground }]}>{puzzle.name}</Text>
-                  <Text style={[styles.puzzleMeta, { color: colors.mutedForeground }]}>
-                    {puzzle.rows}×{puzzle.cols} · {puzzle.hints.length} clues
-                  </Text>
-                </View>
-                <View style={styles.puzzleRight}>
-                  {completed ? (
-                    <View style={styles.completedBadge}>
-                      <Feather name="check-circle" size={18} color={DIFFICULTY_COLORS[selectedDifficulty]} />
-                      <Text style={[styles.completedTime, { color: colors.mutedForeground }]}>
-                        {formatTime(completed.time)}
+        {/* Stats */}
+        {completedCount > 0 && (
+          <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.statBlock}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>{completedCount}</Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>ukończone</Text>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statBlock}>
+              <Text style={[styles.statValue, { color: colors.foreground }]}>{nextLevel - 1}</Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>najwyższy</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Past levels — replayable */}
+        {completedSorted.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>Twoje poziomy</Text>
+            <View style={styles.levelList}>
+              {completedSorted.map(c => {
+                const cfg = levelConfig(c.level);
+                return (
+                  <TouchableOpacity
+                    key={c.level}
+                    style={[styles.levelCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={() => handlePlay(c.level)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.levelNumber, { backgroundColor: LEVEL_COLOR + '20' }]}>
+                      <Text style={[styles.levelNumText, { color: LEVEL_COLOR }]}>
+                        {c.level}
                       </Text>
                     </View>
-                  ) : (
-                    <View style={[styles.playBtn, { backgroundColor: DIFFICULTY_COLORS[selectedDifficulty] }]}>
-                      <Feather name="play" size={14} color="#fff" />
+                    <View style={styles.levelInfo}>
+                      <Text style={[styles.levelName, { color: colors.foreground }]}>
+                        Poziom {c.level}
+                      </Text>
+                      <Text style={[styles.levelMeta, { color: colors.mutedForeground }]}>
+                        {cfg.rows}×{cfg.cols} · {difficultyLabel(c.level)}
+                      </Text>
                     </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                    <View style={styles.levelRight}>
+                      <Feather name="check-circle" size={18} color={LEVEL_COLOR} />
+                      <Text style={[styles.levelTime, { color: colors.mutedForeground }]}>
+                        {formatTime(c.time)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
 
-        {/* Stats summary */}
-        {Object.keys(completedPuzzles).length > 0 && (
-          <View style={[styles.statsCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-            <Text style={[styles.statsTitle, { color: '#ffffff' }]}>
-              {Object.keys(completedPuzzles).length} puzzle{Object.keys(completedPuzzles).length !== 1 ? 's' : ''} solved
+        {completedSorted.length === 0 && (
+          <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="award" size={28} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Zacznij od poziomu 1</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              Każdy następny poziom będzie trudniejszy od poprzedniego.
             </Text>
-            <Feather name="award" size={20} color={colors.primary} />
           </View>
         )}
       </ScrollView>
@@ -164,9 +159,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -174,116 +167,83 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
-  appName: {
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -1,
-  },
-  tagline: {
-    fontSize: 13,
-    marginTop: 1,
-  },
+  appName: { fontSize: 32, fontWeight: '800', letterSpacing: -1 },
+  tagline: { fontSize: 13, marginTop: 1 },
   helpBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  scrollContent: { paddingHorizontal: 20, gap: 16 },
+  heroCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    padding: 24,
+    borderRadius: 20,
+    shadowColor: LEVEL_COLOR,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    gap: 12,
+  heroLeft: { flex: 1, gap: 4 },
+  heroLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
+  heroLevel: { color: '#fff', fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+  heroMeta: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '500' },
+  heroPlay: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  statsCard: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 16,
+  },
+  statBlock: { flex: 1, alignItems: 'center', gap: 2 },
+  statValue: { fontSize: 24, fontWeight: '700' },
+  statLabel: { fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statDivider: { width: 1, marginVertical: 8 },
   sectionLabel: {
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginTop: 8,
     marginBottom: -4,
   },
-  difficultyRow: {
+  levelList: { gap: 10 },
+  levelCard: {
     flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
     borderRadius: 14,
-    padding: 4,
     borderWidth: 1,
-    gap: 2,
-  },
-  difficultyTab: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    gap: 2,
-  },
-  difficultyLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  difficultyDesc: {
-    fontSize: 11,
-  },
-  puzzleList: {
-    gap: 10,
-  },
-  puzzleCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1.5,
     gap: 14,
   },
-  puzzleNumber: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  levelNumber: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  levelNumText: { fontSize: 16, fontWeight: '700' },
+  levelInfo: { flex: 1, gap: 2 },
+  levelName: { fontSize: 16, fontWeight: '600' },
+  levelMeta: { fontSize: 13 },
+  levelRight: { alignItems: 'center', gap: 2 },
+  levelTime: { fontSize: 11 },
+  emptyState: {
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  puzzleNumText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  puzzleInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  puzzleName: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  puzzleMeta: {
-    fontSize: 13,
-  },
-  puzzleRight: {
-    alignItems: 'center',
-  },
-  completedBadge: {
-    alignItems: 'center',
-    gap: 2,
-  },
-  completedTime: {
-    fontSize: 11,
-  },
-  playBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statsCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
+    padding: 24,
     borderRadius: 16,
     borderWidth: 1,
-    marginTop: 8,
+    gap: 8,
   },
-  statsTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
+  emptyTitle: { fontSize: 16, fontWeight: '700' },
+  emptyText: { fontSize: 13, textAlign: 'center' },
 });

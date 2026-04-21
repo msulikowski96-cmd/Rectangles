@@ -1,4 +1,4 @@
-import { Puzzle, Hint, Difficulty } from '../types/game';
+import { Puzzle, Hint } from '../types/game';
 
 // Mulberry32 - small seeded PRNG, deterministic for the same seed
 function mulberry32(seed: number) {
@@ -19,10 +19,22 @@ interface RectSpec {
   c1: number;
 }
 
-function difficultyConfig(difficulty: Difficulty): { rows: number; cols: number; minArea: number; maxArea: number } {
-  if (difficulty === 'easy') return { rows: 5, cols: 5, minArea: 2, maxArea: 6 };
-  if (difficulty === 'medium') return { rows: 7, cols: 7, minArea: 2, maxArea: 8 };
-  return { rows: 9, cols: 9, minArea: 2, maxArea: 9 };
+export interface LevelConfig {
+  rows: number;
+  cols: number;
+  minArea: number;
+  maxArea: number;
+}
+
+// Continuous progression — each level is harder than the previous.
+// Difficulty increases via grid size and max rectangle area.
+export function levelConfig(level: number): LevelConfig {
+  const lvl = Math.max(1, level);
+  // Grid grows from 5 → 9 over the first ~20 levels, then stays at 9.
+  const grid = Math.min(5 + Math.floor((lvl - 1) / 5), 9);
+  // Max rectangle area grows steadily, capped by grid for sanity.
+  const maxArea = Math.min(4 + Math.floor((lvl - 1) / 2), Math.max(grid, 12));
+  return { rows: grid, cols: grid, minArea: 2, maxArea };
 }
 
 function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea: number, rng: () => number): RectSpec[] | null {
@@ -53,7 +65,6 @@ function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea:
 
       if (candidates.length === 0) return null;
 
-      // Bias toward larger areas weighted by area
       const weights = candidates.map(c => c.area);
       const total = weights.reduce((a, b) => a + b, 0);
       let pickIdx = 0;
@@ -78,9 +89,7 @@ function tryGenerateLayout(rows: number, cols: number, minArea: number, maxArea:
   return rects;
 }
 
-// Count solutions of a puzzle by backtracking. Stops at `limit` to keep it fast.
 function countSolutions(rows: number, cols: number, hints: Hint[], limit: number): number {
-  // Precompute candidate rectangles for each hint
   const candsForHint: RectSpec[][] = hints.map(hint => {
     const out: RectSpec[] = [];
     const v = hint.value;
@@ -92,7 +101,6 @@ function countSolutions(rows: number, cols: number, hints: Hint[], limit: number
         for (let c0 = Math.max(0, hint.col - w + 1); c0 <= hint.col; c0++) {
           const c1 = c0 + w - 1;
           if (c1 < hint.col || c1 >= cols) continue;
-          // exactly one hint inside (the current one)
           let containsCount = 0;
           for (const h2 of hints) {
             if (h2.row >= r0 && h2.row <= r1 && h2.col >= c0 && h2.col <= c1) {
@@ -108,10 +116,8 @@ function countSolutions(rows: number, cols: number, hints: Hint[], limit: number
     return out;
   });
 
-  // If any hint has zero candidates, unsolvable
   for (const cands of candsForHint) if (cands.length === 0) return 0;
 
-  // Order hints by least candidates first (constraint propagation friendly)
   const order = hints.map((_, i) => i).sort((a, b) => candsForHint[a].length - candsForHint[b].length);
 
   const grid: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
@@ -131,7 +137,6 @@ function countSolutions(rows: number, cols: number, hints: Hint[], limit: number
   function solve(idx: number) {
     if (count >= limit) return;
     if (idx === order.length) {
-      // ensure full coverage
       for (let r = 0; r < rows; r++)
         for (let c = 0; c < cols; c++)
           if (grid[r][c] === 0) return;
@@ -159,9 +164,8 @@ interface BuiltPuzzle {
   layout: RectSpec[];
 }
 
-function buildOnce(difficulty: Difficulty, seed: number, hintRng: () => number): BuiltPuzzle | null {
-  const { rows, cols, minArea, maxArea } = difficultyConfig(difficulty);
-  const layout = tryGenerateLayout(rows, cols, minArea, maxArea, mulberry32(seed));
+function buildOnce(cfg: LevelConfig, layoutSeed: number, hintRng: () => number): BuiltPuzzle | null {
+  const layout = tryGenerateLayout(cfg.rows, cfg.cols, cfg.minArea, cfg.maxArea, mulberry32(layoutSeed));
   if (!layout) return null;
   const hints: Hint[] = layout.map(rect => {
     const w = rect.c1 - rect.c0 + 1;
@@ -170,34 +174,28 @@ function buildOnce(difficulty: Difficulty, seed: number, hintRng: () => number):
     const hc = rect.c0 + Math.floor(hintRng() * w);
     return { row: hr, col: hc, value: w * h };
   });
-  return { rows, cols, hints, layout };
+  return { rows: cfg.rows, cols: cfg.cols, hints, layout };
 }
 
-function buildUniquePuzzle(difficulty: Difficulty, baseSeed: number, maxAttempts = 60): BuiltPuzzle {
+function buildUnique(cfg: LevelConfig, baseSeed: number, maxAttempts = 60): BuiltPuzzle {
   let bestNonUnique: { built: BuiltPuzzle; count: number } | null = null;
   let seed = baseSeed >>> 0;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Try several hint placements per layout before changing layout
     for (let hintTry = 0; hintTry < 6; hintTry++) {
       const hintRng = mulberry32((seed ^ 0x9E3779B9 ^ (hintTry * 2654435761)) >>> 0);
-      const built = buildOnce(difficulty, seed, hintRng);
-      if (!built) break; // bad layout seed, skip to next
+      const built = buildOnce(cfg, seed, hintRng);
+      if (!built) break;
       const count = countSolutions(built.rows, built.cols, built.hints, 2);
       if (count === 1) return built;
       if (count >= 1 && (!bestNonUnique || count < bestNonUnique.count)) {
         bestNonUnique = { built, count };
       }
     }
-    // Move to next layout seed
     seed = (Math.imul(seed, 16807) + 1) >>> 0;
   }
-
-  // Fallback: best we found (still solvable, just not unique)
   if (bestNonUnique) return bestNonUnique.built;
 
-  // Worst case: build with relaxed minArea
-  const cfg = difficultyConfig(difficulty);
   const layout = tryGenerateLayout(cfg.rows, cfg.cols, 1, cfg.maxArea, mulberry32(baseSeed)) || [];
   const hintRng = mulberry32(baseSeed ^ 0xABCDEF);
   const hints: Hint[] = layout.map(rect => {
@@ -212,11 +210,19 @@ function buildUniquePuzzle(difficulty: Difficulty, baseSeed: number, maxAttempts
   return { rows: cfg.rows, cols: cfg.cols, hints, layout };
 }
 
-export function generatePuzzle(difficulty: Difficulty, seed: number, name: string, id: string): Puzzle {
-  const built = buildUniquePuzzle(difficulty, seed);
+// Deterministic per-level seed — same level always produces same puzzle,
+// but each level number gets a totally different one.
+function levelSeed(level: number): number {
+  // Mix the level number with a large prime for good seed distribution
+  return ((level * 2654435761) ^ 0xDEADBEEF) >>> 0;
+}
+
+export function generateLevelPuzzle(level: number): Puzzle {
+  const cfg = levelConfig(level);
+  const built = buildUnique(cfg, levelSeed(level));
   return {
-    id,
-    name,
+    id: `level-${level}`,
+    name: `Poziom ${level}`,
     rows: built.rows,
     cols: built.cols,
     hints: built.hints,
@@ -229,28 +235,4 @@ export function generatePuzzle(difficulty: Difficulty, seed: number, name: strin
       hintCol: 0,
     })),
   };
-}
-
-const PUZZLE_NAMES: Record<Difficulty, string[]> = {
-  easy: ['Spacer', 'Rozgrzewka', 'Pierwszy krok', 'Lekka bryza', 'Świtanie', 'Promyk', 'Mała chmura', 'Iskra'],
-  medium: ['Wyzwanie', 'Burza myśli', 'Labirynt', 'Mozaika', 'Skupienie', 'Strategia', 'Próba', 'Splot'],
-  hard: ['Mistrz', 'Zagadka', 'Łamigłówka', 'Twierdza', 'Ekspert', 'Próba sił', 'Cierpliwość', 'Geniusz'],
-};
-
-export function generatePuzzleSet(difficulty: Difficulty, count = 8): Puzzle[] {
-  const names = PUZZLE_NAMES[difficulty];
-  const baseSeed = difficulty === 'easy' ? 1000 : difficulty === 'medium' ? 5000 : 9000;
-  return Array.from({ length: count }).map((_, i) =>
-    generatePuzzle(
-      difficulty,
-      baseSeed + i * 137,
-      names[i % names.length] + ' ' + (i + 1),
-      `${difficulty}-gen-${i + 1}`,
-    ),
-  );
-}
-
-export function generateRandomPuzzle(difficulty: Difficulty): Puzzle {
-  const seed = (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0;
-  return generatePuzzle(difficulty, seed, 'Losowa', `${difficulty}-rand-${seed}`);
 }

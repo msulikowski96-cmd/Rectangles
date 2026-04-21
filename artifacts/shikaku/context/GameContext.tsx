@@ -2,28 +2,30 @@ import React, { createContext, useContext, useState, useCallback, useRef, useEff
 import { Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Puzzle, Rectangle, Cell, GameState, Difficulty } from '../types/game';
+import { Puzzle, Rectangle, Cell, GameState } from '../types/game';
 import {
   validateRectangle,
   checkPuzzleComplete,
   generateRectId,
   getRectangleBounds,
 } from '../utils/gameLogic';
+import { generateLevelPuzzle } from '../utils/puzzleGenerator';
 
-interface CompletedPuzzle {
-  id: string;
+interface CompletedLevel {
+  level: number;
   time: number;
   moves: number;
 }
 
 interface ExtendedGameState extends GameState {
+  level: number;
   history: Rectangle[][];
   lastErrorAt: number;
 }
 
 interface GameContextType {
   gameState: ExtendedGameState | null;
-  startGame: (puzzle: Puzzle) => void;
+  startLevel: (level: number) => void;
   beginDrawing: (cell: Cell) => void;
   updateDrawing: (cell: Cell) => void;
   endDrawing: () => void;
@@ -31,12 +33,14 @@ interface GameContextType {
   resetGame: () => void;
   undo: () => void;
   canUndo: boolean;
-  completedPuzzles: Record<string, CompletedPuzzle>;
-  selectedDifficulty: Difficulty;
-  setSelectedDifficulty: (d: Difficulty) => void;
+  completedLevels: Record<number, CompletedLevel>;
+  highestLevelReached: number; // next level the player should play
 }
 
 const GameContext = createContext<GameContextType | null>(null);
+
+const STORAGE_LEVELS = 'completedLevels';
+const STORAGE_PROGRESS = 'highestLevelReached';
 
 function triggerHaptic(type: 'light' | 'medium' | 'success' | 'error') {
   if (Platform.OS === 'web') return;
@@ -50,31 +54,45 @@ function triggerHaptic(type: 'light' | 'medium' | 'success' | 'error') {
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [gameState, setGameState] = useState<ExtendedGameState | null>(null);
-  const [completedPuzzles, setCompletedPuzzles] = useState<Record<string, CompletedPuzzle>>({});
-  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('easy');
+  const [completedLevels, setCompletedLevels] = useState<Record<number, CompletedLevel>>({});
+  const [highestLevelReached, setHighestLevelReached] = useState<number>(1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    loadCompletedPuzzles();
+    (async () => {
+      try {
+        const data = await AsyncStorage.getItem(STORAGE_LEVELS);
+        if (data) setCompletedLevels(JSON.parse(data));
+      } catch {}
+      try {
+        const lvl = await AsyncStorage.getItem(STORAGE_PROGRESS);
+        if (lvl) setHighestLevelReached(Math.max(1, parseInt(lvl, 10) || 1));
+      } catch {}
+    })();
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
-  const loadCompletedPuzzles = async () => {
-    try {
-      const data = await AsyncStorage.getItem('completedPuzzles');
-      if (data) setCompletedPuzzles(JSON.parse(data));
-    } catch {}
+  const persistCompleted = (next: Record<number, CompletedLevel>) => {
+    AsyncStorage.setItem(STORAGE_LEVELS, JSON.stringify(next)).catch(() => {});
+  };
+  const persistHighest = (lvl: number) => {
+    AsyncStorage.setItem(STORAGE_PROGRESS, String(lvl)).catch(() => {});
   };
 
-  const saveCompletedPuzzle = async (id: string, time: number, moves: number) => {
-    setCompletedPuzzles(prev => {
-      const existing = prev[id];
+  const saveCompletedLevel = (level: number, time: number, moves: number) => {
+    setCompletedLevels(prev => {
+      const existing = prev[level];
       if (existing && existing.time <= time) return prev;
-      const updated = { ...prev, [id]: { id, time, moves } };
-      AsyncStorage.setItem('completedPuzzles', JSON.stringify(updated)).catch(() => {});
+      const updated = { ...prev, [level]: { level, time, moves } };
+      persistCompleted(updated);
       return updated;
+    });
+    setHighestLevelReached(prev => {
+      const next = Math.max(prev, level + 1);
+      if (next !== prev) persistHighest(next);
+      return next;
     });
   };
 
@@ -88,11 +106,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }, 1000);
   };
 
-  const startGame = useCallback((puzzle: Puzzle) => {
+  const startLevel = useCallback((level: number) => {
     if (timerRef.current) clearInterval(timerRef.current);
+    const puzzle: Puzzle = generateLevelPuzzle(level);
     const now = Date.now();
     setGameState({
       puzzle,
+      level,
       rectangles: [],
       selectedCell: null,
       drawingStart: null,
@@ -133,7 +153,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         drawingStart.row, drawingStart.col, drawingEnd.row, drawingEnd.col
       );
 
-      // Single tap on existing rect → delete
+      // Single-tap on existing rect → delete
       if (minRow === maxRow && minCol === maxCol) {
         const existingRect = rectangles.find(r => {
           const rb = getRectangleBounds(r.startRow, r.startCol, r.endRow, r.endCol);
@@ -187,7 +207,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         triggerHaptic('success');
         const time = Math.floor((Date.now() - prev.startTime) / 1000);
         const moves = prev.moves + 1;
-        saveCompletedPuzzle(puzzle.id, time, moves);
+        saveCompletedLevel(prev.level, time, moves);
         return {
           ...prev,
           rectangles: newRects,
@@ -261,7 +281,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   return (
     <GameContext.Provider value={{
       gameState,
-      startGame,
+      startLevel,
       beginDrawing,
       updateDrawing,
       endDrawing,
@@ -269,9 +289,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       resetGame,
       undo,
       canUndo: !!gameState && gameState.history.length > 0 && !gameState.isComplete,
-      completedPuzzles,
-      selectedDifficulty,
-      setSelectedDifficulty,
+      completedLevels,
+      highestLevelReached,
     }}>
       {children}
     </GameContext.Provider>
