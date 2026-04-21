@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "03860fa7-9542-425f-993b-7dfce0b08902"
+      }
+    },
+    "android": {
+      "package": "com.teabe78th.workspace"
+    },
+    "ios": {
+      "bundleIdentifier": "com.teabe78th.workspace"
+    }
+  }
+}

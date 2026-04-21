@@ -14,9 +14,17 @@
       "backgroundColor": "#1a1a2e"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rectangles.game"
     },
-    "android": {},
+    "android": {
+      "package": "com.rectangles.game",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#1a1a2e"
+      }
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
