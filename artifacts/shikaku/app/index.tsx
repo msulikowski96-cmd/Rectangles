@@ -52,7 +52,7 @@ export default function HomeScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16, backgroundColor: colors.background }]}>
         <View>
-          <Text style={[styles.appName, { color: colors.foreground }]}>Shikaku</Text>
+          <Text style={[styles.appName, { color: colors.foreground }]}>Rectangles</Text>
           <Text style={[styles.tagline, { color: colors.mutedForeground }]}>Łamigłówka prostokątów</Text>
         </View>
         <TouchableOpacity
