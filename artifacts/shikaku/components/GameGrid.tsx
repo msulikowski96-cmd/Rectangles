@@ -47,7 +47,7 @@ export function GameGrid({ cellSize }: GameGridProps) {
   const { puzzle, rectangles, drawingStart, drawingEnd } = gameState;
   const { rows, cols, hints } = puzzle;
 
-  const labelSize = Math.min(Math.round(cellSize * 0.45), 14);
+  const labelSize = Math.min(Math.round(cellSize * 0.45), 18);
 
   const getCellFromPosition = useCallback((pageX: number, pageY: number) => {
     const { x, y } = gridLayout.current;
@@ -314,7 +314,7 @@ export function GameGrid({ cellSize }: GameGridProps) {
                       styles.hintText,
                       {
                         color: isHighlighted ? '#fff' : colors.hintText,
-                        fontSize: cellSize * 0.4,
+                        fontSize: Math.round(cellSize * 0.55),
                       },
                     ]}
                   >

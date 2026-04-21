@@ -31,9 +31,10 @@ export default function GameScreen() {
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const cellSize = useMemo(() => {
-    if (!gameState) return 44;
-    const available = Math.min(SCREEN_WIDTH - GRID_PADDING * 2, 400);
-    return Math.floor(available / gameState.puzzle.cols);
+    if (!gameState) return 56;
+    const available = Math.min(SCREEN_WIDTH - GRID_PADDING * 2, 560);
+    const minCell = 44;
+    return Math.max(minCell, Math.floor(available / gameState.puzzle.cols));
   }, [gameState?.puzzle.cols]);
 
   const handleBack = () => {
