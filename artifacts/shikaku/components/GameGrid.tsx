@@ -21,8 +21,7 @@ export function GameGrid({ cellSize }: GameGridProps) {
   const { gameState, beginDrawing, updateDrawing, endDrawing } = useGame();
   const colors = useColors();
   const isDrawing = useRef(false);
-  const gridRef = useRef<View>(null);
-  const gridLayout = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const startCellRef = useRef<{ row: number; col: number } | null>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const lastErrorRef = useRef(0);
 
@@ -49,46 +48,52 @@ export function GameGrid({ cellSize }: GameGridProps) {
 
   const labelSize = Math.min(Math.round(cellSize * 0.45), 18);
 
-  const getCellFromPosition = useCallback((pageX: number, pageY: number) => {
-    const { x, y } = gridLayout.current;
-    const localX = pageX - x;
-    const localY = pageY - y;
-    const col = Math.floor(localX / cellSize);
-    const row = Math.floor(localY / cellSize);
-    if (row >= 0 && row < rows && col >= 0 && col < cols) {
-      return { row, col };
-    }
-    return null;
-  }, [cellSize, rows, cols]);
+  const clampCell = useCallback((row: number, col: number) => ({
+    row: Math.max(0, Math.min(rows - 1, row)),
+    col: Math.max(0, Math.min(cols - 1, col)),
+  }), [rows, cols]);
 
   const panResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => !gameState.isComplete,
-    onMoveShouldSetPanResponder: () => !gameState.isComplete,
+    onMoveShouldSetPanResponder: (_evt, gs) =>
+      !gameState.isComplete && (Math.abs(gs.dx) > 2 || Math.abs(gs.dy) > 2),
+    onStartShouldSetPanResponderCapture: () => !gameState.isComplete,
+    onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (evt: GestureResponderEvent) => {
-      const { pageX, pageY } = evt.nativeEvent;
-      const cell = getCellFromPosition(pageX, pageY);
-      if (cell) {
-        isDrawing.current = true;
-        beginDrawing(cell);
-      }
+      const { locationX, locationY } = evt.nativeEvent;
+      const cell = clampCell(
+        Math.floor(locationY / cellSize),
+        Math.floor(locationX / cellSize),
+      );
+      isDrawing.current = true;
+      startCellRef.current = cell;
+      beginDrawing(cell);
     },
-    onPanResponderMove: (evt: GestureResponderEvent) => {
-      if (!isDrawing.current) return;
-      const { pageX, pageY } = evt.nativeEvent;
-      const cell = getCellFromPosition(pageX, pageY);
-      if (cell) {
-        updateDrawing(cell);
-      }
+    onPanResponderMove: (_evt, gs) => {
+      if (!isDrawing.current || !startCellRef.current) return;
+      // Use start cell center + cumulative delta — no dependency on absolute
+      // screen position, so scrolling/layout shifts don't break it.
+      const startX = startCellRef.current.col * cellSize + cellSize / 2;
+      const startY = startCellRef.current.row * cellSize + cellSize / 2;
+      const cell = clampCell(
+        Math.floor((startY + gs.dy) / cellSize),
+        Math.floor((startX + gs.dx) / cellSize),
+      );
+      updateDrawing(cell);
     },
     onPanResponderRelease: () => {
       if (isDrawing.current) {
         isDrawing.current = false;
+        startCellRef.current = null;
         endDrawing();
       }
     },
     onPanResponderTerminate: () => {
-      isDrawing.current = false;
-      endDrawing();
+      if (isDrawing.current) {
+        isDrawing.current = false;
+        startCellRef.current = null;
+        endDrawing();
+      }
     },
   });
 
@@ -208,12 +213,6 @@ export function GameGrid({ cellSize }: GameGridProps) {
 
         {/* Grid */}
         <View
-          ref={gridRef}
-          onLayout={() => {
-            gridRef.current?.measureInWindow((x, y, width, height) => {
-              gridLayout.current = { x, y, width, height };
-            });
-          }}
           style={[styles.grid, { width: gridWidth, height: gridHeight, borderColor: colors.gridBorder }]}
           {...panResponder.panHandlers}
         >
